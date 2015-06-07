@@ -1,0 +1,165 @@
+.load kext.dll
+.load kdexts.dll
+
+$$ con la version local debugger de windbg no podemos escribir algunas direcciones de memoria directamente,
+$$ lo que sí podemos hacer es convertir dicha VA a physical address y escribir a la physical address:
+$$
+$$ !vtop 0 VA_TO_WRITE
+$$
+$$ !eb PHYSICAL_TO_WRITE  90 90 90 90 90 90 cc
+
+
+.block
+{
+
+
+ $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+ $$ Get the Physical Adress of NtCreateFile
+ $$
+
+ $$ get the address of nt!NtCreateFile 
+ ? nt!NtCreateFile
+
+ $$ @$exp contains the address of NtCreateFile, so we create a alias for it
+ aS /x va  @$exp
+ 
+ .block
+ {
+  $$ get the physical address of NtCreateFile
+  !vtop 0 va
+
+  $$ parse the results of vtop
+  r @$t1 = 0
+  .foreach (tok { !vtop 0 va })
+  {    
+    .catch { 
+      .printf "tok"
+      .printf "\n"
+      .if(@$t1==1)
+      {      
+       r @$t1 = ${tok}
+       .break
+      }
+      
+      $$ in the results of vtop, when we find "phys" token, after it, it comes the physical address
+      .if($spat("${tok}","phys"))
+      {       
+       r @$t1 = 1
+      }
+    }
+  }
+ } 
+ ad va
+ 
+ $$ after parsing vtop results we keep the physical address in @$t1, we create a alias
+ aS /x phaNtCreateFile @$t1
+ 
+
+ $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+ $$ Get the Physical Adress of KeBugCheckEx
+ $$
+
+ $$ get the address of nt!KeBugCheckEx 
+ ? nt!KeBugCheckEx
+
+ $$ @$exp contains the address of KeBugCheckEx, so we create a alias for it
+ aS /x va  @$exp
+ 
+ .block
+ {
+  $$ get the physical address of KeBugCheckEx
+  !vtop 0 va
+
+  $$ parse the results of vtop
+  r @$t1 = 0
+  .foreach (tok { !vtop 0 va })
+  {    
+    .catch { 
+      .printf "tok"
+      .printf "\n"
+      .if(@$t1==1)
+      {      
+       r @$t1 = ${tok}
+       .break
+      }
+      
+      $$ in the results of vtop, when we find "phys" token, after it, it comes the physical address
+      .if($spat("${tok}","phys"))
+      {       
+       r @$t1 = 1
+      }
+    }
+  }
+ } 
+ ad va
+ 
+ $$ after parsing vtop results we keep the physical address in @$t1, we create a alias
+ aS /x phaKeBugCheckEx @$t1
+ 
+ 
+ $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+ $$ Write our code to KeBugCheckEx (we will use the memory space of this function coz it wont be called unless
+ $$ the system crashes)
+ $$
+ 
+ .block
+ {
+  .printf "nt!NtCreateFile physical address %p\n", phaNtCreateFile
+  .printf "nt!NtKeyBugCheck physical address %p\n", phaKeBugCheckEx
+  
+  $$ now we are going to write our code to KeBugCheckEx
+  
+  !eb phaKeBugCheckEx 90 90 90 90 90 90 90 90 
+
+  $$ now lets see the code of nt!NtCreateFile in the target system (win 8.1 x64)
+  $$
+  $$ nt!NtCreateFile:
+  $$ fffff803f846020 4c8bdc          mov     r11,rsp
+  $$ fffff803f846023 4881ec88000000  sub     rsp,88h
+  $$ fffff803f84602a 33c0            xor     eax,eax
+  $$ fffff803f84602c 498943f0        mov     qword ptr [r11-10h],rax
+  $$ fffff803f846030 c744247020000000 mov     dword ptr [rsp+70h],20h
+  $$ fffff803f846038 89442468        mov     dword ptr [rsp+68h],eax
+  $$ fffff803f84603c 498943d8        mov     qword ptr [r11-28h],rax
+  $$ fffff803f846040 89442458        mov     dword ptr [rsp+58h],eax
+  $$ fffff803f846044 8b8424e0000000  mov     eax,dword ptr [rsp+0E0h]
+  $$ fffff803f84604b 89442450        mov     dword ptr [rsp+50h],eax
+  $$ fffff803f84604f 488b8424d8000000 mov     rax,qword ptr [rsp+0D8h]
+  $$ fffff803f846057 498943c0        mov     qword ptr [r11-40h],rax
+  $$ fffff803f84605b 8b8424d0000000  mov     eax,dword ptr [rsp+0D0h]
+  $$ fffff803f846062 89442440        mov     dword ptr [rsp+40h],eax
+  $$ fffff803f846066 8b8424c8000000  mov     eax,dword ptr [rsp+0C8h]
+  $$ fffff803f84606d 89442438        mov     dword ptr [rsp+38h],eax
+  $$ fffff803f846071 8b8424c0000000  mov     eax,dword ptr [rsp+0C0h]
+  $$ fffff803f846078 89442430        mov     dword ptr [rsp+30h],eax
+  $$ fffff803f84607c 8b8424b8000000  mov     eax,dword ptr [rsp+0B8h]
+  $$ fffff803f846083 89442428        mov     dword ptr [rsp+28h],eax
+  $$ fffff803f846087 488b8424b0000000 mov     rax,qword ptr [rsp+0B0h]
+  $$ fffff803f84608f 49894398        mov     qword ptr [r11-68h],rax
+  $$ fffff803f846093 e808000000      call    nt!IopCreateFile (fffff803ef8460a0)
+  
+  $$ to do it easier, we will hook the call to nt!IopCreateFile. This call is at nt!NtCreateFile + 0x73
+  
+  $$ in the code that we have written in KeBugCheck, we have to put a jmp to continue the execution 
+  $$ at nt!IopCreateFile (after the 90 90 90 90 90 90 90 90 that we wrote). Remember that E9 instruction 
+  $$ is a relative jump and the value that the instruction  admits as parameter is the difference of:   
+  $$ target_address - (E9_ins_address+5).
+  $$ We need to have precalculated (nt!IopCreateFile)-(nt!KeBugCheckEx+8+5) = 0x002eb6f3 because !eb 
+  $$ needs we pass inmediate values (i have to research to avoid needing to have these values precalculated)
+  
+  r $t1 = phaKeBugCheckEx
+  r $t1 = $t1 + 8
+  !eb $t1 E9 f3 b6 2e 00
+
+
+  $$ finally hook the call   nt!IopCreateFile, it will be executed the next time that NtCreateFile was called and it
+  $$ will jmp to our code. We need precalculate the relative jump value: (nt!KeBugCheckEx-(nt!NtCreateFile+0x73+5)) = 0xffd14908
+  $$ because !eb needs we pass inmediate values (i have to research to avoid needing to have these values precalculated)
+  
+  r $t1 = phaNtCreateFile
+  r $t1 = $t1 + 0x74
+  !eb $t1 08 49 d1 ff
+
+ }
+ ad *
+}

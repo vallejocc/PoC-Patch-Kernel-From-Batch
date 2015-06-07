@@ -1,0 +1,21 @@
+.OPTION EXPLICIT                     ; Generate errors on variable typos
+
+.Set MaxDiskFileCount=1000
+.Set MaxDiskSize=512000000
+
+.Set Cabinet=on
+.Set Compress=off
+.Set InfAttr=                        ; Turn off read-only, etc. attrs
+setup.bat   
+
+.Set Cabinet=on
+.Set Compress=on
+dbgeng.dll
+dbghelp.dll
+jmpkernel_hookcreatefile.wdbg
+kdexts.dll
+kext.dll
+symsrv.dll
+symsrv.yes
+windbg.exe
+promptUAC.lnk
